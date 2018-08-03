@@ -1,10 +1,16 @@
 #import "MediaRemote.h"
 #import <AudioToolbox/AudioServices.h>
 
+@interface SBApplication
+-(NSString *)bundleIdentifier;
+@end
+
 @interface SpringBoard : NSObject
 -(BOOL)_handlePhysicalButtonEvent:(id)arg1 ;
 -(void)_simulateHomeButtonPress;
 -(void)_simulateLockButtonPress;
+-(void)takeScreenshot;
+-(SBApplication *)_accessibilityFrontMostApplication;
 @end
  
 @interface SBMediaController : NSObject
@@ -59,6 +65,7 @@ BOOL upPressed = NO;
 BOOL downPressed = NO;
 BOOL upRecentlyPressed = NO;
 BOOL downRecentlyPressed = NO;
+BOOL shouldScreenshot = NO;
 
 
 NSTimer *upRecentTimer;
@@ -66,13 +73,17 @@ NSTimer *downRecentTimer;
 NSTimer *forwardTimer;
 NSTimer *backTimer;
 
-%hook SpringBoard
-
+%hook SpringBoard 
 	-(_Bool)_handlePhysicalButtonEvent:(UIPressesEvent *)arg1 
 	{
+		if([[[self _accessibilityFrontMostApplication] bundleIdentifier] isEqualToString:@"com.apple.camera"]){
+			return %orig;
+		}
         BOOL passEvent = NO;
         BOOL hasUp = NO;
         BOOL hasDown = NO;
+		BOOL hasLock = NO;
+
 
         for(UIPress* press in arg1.allPresses.allObjects) {
             if (press.type == 102 && press.force == 1) {
@@ -81,21 +92,24 @@ NSTimer *backTimer;
             if (press.type == 103 && press.force == 1) {
                 hasDown = YES;
             }
+	        if (press.type == 104 && press.force == 1) {
+		        hasLock = YES;
+			}
         }
 
-        for(UIPress* press in arg1.allPresses.allObjects) {
-            if (press.type == 104) {
-                return %orig;
-            }
-        }
 
         if (hasUp && hasDown) {
             MRMediaRemoteSendCommand(kMRTogglePlayPause, nil);
-            AudioServicesPlaySystemSoundWithCompletion(kSystemSoundID_Vibrate, ^{
-                AudioServicesDisposeSystemSoundID(kSystemSoundID_Vibrate);
+            AudioServicesPlaySystemSoundWithCompletion(SystemSoundID(1520), ^{
+                AudioServicesDisposeSystemSoundID(SystemSoundID(1520));
             });
             return false;
         }
+		if(hasUp && hasLock){
+	        shouldScreenshot = true;
+			return false;
+		}
+
 
 		int type = arg1.allPresses.allObjects[0].type; 
 		int force = arg1.allPresses.allObjects[0].force;
@@ -128,14 +142,19 @@ NSTimer *backTimer;
         }
 
         if(type == 102 && force == 0) //VOLUME UP RELEASED
-        {
+        {	
             if (upPressed) {
-                //Do volume up
-                float volume;
-                [[objc_getClass("AVSystemController") sharedAVSystemController] getActiveCategoryVolume:&volume andName:nil];
-                volume = volume + 1.0/16;
-                if (volume > 1) volume = 1;
-                [[objc_getClass("AVSystemController") sharedAVSystemController] setActiveCategoryVolumeTo:volume];
+				if (shouldScreenshot){
+					[self takeScreenshot];
+					shouldScreenshot = false;
+				}else{
+					//Do volume up
+					float volume;
+					[[objc_getClass("AVSystemController") sharedAVSystemController] getActiveCategoryVolume:&volume andName:nil];
+					volume = volume + 1.0/16;
+					if (volume > 1) volume = 1;
+					[[objc_getClass("AVSystemController") sharedAVSystemController] setActiveCategoryVolumeTo:volume];
+				}
             }
             upPressed = NO;
             if (forwardTimer != nil) {
@@ -171,8 +190,8 @@ NSTimer *backTimer;
     {
         if (upPressed) {
             MRMediaRemoteSendCommand(kMRNextTrack, nil);
-            AudioServicesPlaySystemSoundWithCompletion(kSystemSoundID_Vibrate, ^{
-                AudioServicesDisposeSystemSoundID(kSystemSoundID_Vibrate);
+            AudioServicesPlaySystemSoundWithCompletion(SystemSoundID(1520), ^{
+                AudioServicesDisposeSystemSoundID(SystemSoundID(1520));
             });
             upPressed = NO;
         }
@@ -183,8 +202,8 @@ NSTimer *backTimer;
     {
         if (downPressed) {
             MRMediaRemoteSendCommand(kMRPreviousTrack, nil);
-            AudioServicesPlaySystemSoundWithCompletion(kSystemSoundID_Vibrate, ^{
-                AudioServicesDisposeSystemSoundID(kSystemSoundID_Vibrate);
+            AudioServicesPlaySystemSoundWithCompletion(SystemSoundID(1520), ^{
+                AudioServicesDisposeSystemSoundID(SystemSoundID(1520));
             });
             downPressed = NO;
         }
